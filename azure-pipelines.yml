@@ -1,0 +1,68 @@
+# ASP.NET Core CI/CD Pipeline for Gift of the Givers
+trigger:
+- master
+- development
+
+pool:
+  name: GiftOfTheGivers-Pool12
+
+variables:
+  buildConfiguration: 'Release'
+
+steps:
+# 1. Install .NET SDK
+- task: UseDotNet@2
+  displayName: 'Install .NET 10 SDK'
+  inputs:
+    packageType: 'sdk'
+    version: '10.x'
+
+# 2. Restore Dependencies
+- script: dotnet restore GiftOfTheGivers.sln
+  displayName: 'Restore dependencies'
+
+# 3. Build Solution
+- script: dotnet build GiftOfTheGivers.sln --configuration $(buildConfiguration) --no-restore
+  displayName: 'Build solution'
+
+# 4. Run Automated Tests (from Section B)
+- script: dotnet test GiftOfTheGivers.sln --configuration $(buildConfiguration) --no-build --logger "trx"
+  displayName: 'Run automated tests'
+
+# ==========================================
+# SECTION C: CONTINUOUS DEPLOYMENT TASKS
+# ==========================================
+
+# 5. Publish Web App to a folder
+- task: DotNetCoreCLI@2
+  displayName: 'Publish ASP.NET Core Web App'
+  inputs:
+    command: 'publish'
+    publishWebProjects: true
+    arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/Web'
+
+# 6. Deploy Web App to Azure App Service (Section C.1)
+- task: AzureWebApp@1
+  displayName: 'Deploy to Azure App Service'
+  inputs:
+    azureSubscription: 'Azure for Students' # Or the exact name of your Azure service connection in DevOps
+    appType: 'webApp'
+    appName: 'GiftOfGivers2026' # Match the exact name of your Azure App Service from Part 1
+    package: '$(Build.ArtifactStagingDirectory)/Web/**/*.zip'
+
+# 7. Publish Azure Functions Project (Section C.2)
+- task: DotNetCoreCLI@2
+  displayName: 'Publish Azure Functions'
+  inputs:
+    command: 'publish'
+    projects: '**/DonationFunctionApp.csproj' # Make sure this matches your function project folder/name
+    arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/Functions'
+
+# 8. Deploy Function App to Azure (Section C.2)
+- task: AzureFunctionApp@1
+  displayName: 'Deploy to Azure Function App'
+  inputs:
+    azureSubscription: 'Azure for Students'
+    appType: 'functionApp'
+    appName: 'DonationFunctionApp' # Match your Azure Function App name
+    package: '$(Build.ArtifactStagingDirectory)/Functions/**/*.zip'
