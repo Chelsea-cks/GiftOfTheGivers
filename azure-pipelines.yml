@@ -66,25 +66,21 @@ stages:
   displayName: 'Deployment Stage (Section C)'
   dependsOn: BuildAndTest
   jobs:
-  - deployment: DeployStagingJob
-    displayName: 'Deploy to Local Staging Environment'
-    environment: 'Staging'
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-          - download: current
-            artifact: 'GiftOfTheGiversRelease'
-          
-          - task: PowerShell@2
-            displayName: 'Extract and Deploy Application Files'
-            inputs:
-              targetType: 'inline'
-              script: |
-                $destination = "C:\inetpub\wwwroot\GiftOfTheGivers"
-                if (!(Test-Path $destination)) {
-                    New-Item -ItemType Directory -Force -Path $destination
-                }
-                Write-Host "Deploying build artifacts to $destination..."
-                Expand-Archive -Path "$(Pipeline.Workspace)\GiftOfTheGiversRelease\*.zip" -DestinationPath $destination -Force
-                Write-Host "Deployment completed successfully!"
+  - job: DeployStagingJob
+    displayName: 'Deploy to Local Staging Folder'
+    steps:
+    - download: current
+      artifact: 'GiftOfTheGiversRelease'
+    
+    - task: PowerShell@2
+      displayName: 'Extract and Deploy Files'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $destination = "C:\Deployment\GiftOfTheGivers"
+          if (!(Test-Path $destination)) {
+              New-Item -ItemType Directory -Force -Path $destination
+          }
+          Write-Host "Deploying build artifacts to $destination..."
+          Expand-Archive -Path "$(Pipeline.Workspace)\GiftOfTheGiversRelease\*.zip" -DestinationPath $destination -Force
+          Write-Host "Deployment completed successfully!"
