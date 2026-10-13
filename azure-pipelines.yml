@@ -1,10 +1,9 @@
-# ASP.NET Core CI/CD Pipeline for Gift of the Givers
 trigger:
-- master
-- development
+  - main
+  - master
 
 pool:
-  name: GiftOfTheGivers-Pool12
+  vmImage: 'ubuntu-latest'
 
 variables:
   buildConfiguration: 'Release'
@@ -12,57 +11,40 @@ variables:
 steps:
 # 1. Install .NET SDK
 - task: UseDotNet@2
-  displayName: 'Install .NET 10 SDK'
+  displayName: 'Install .NET SDK'
   inputs:
     packageType: 'sdk'
-    version: '10.x'
+    version: '10.x' # Uses .NET 10 to match your project target framework
+    includePreviewVersions: true
 
-# 2. Restore Dependencies
-- script: dotnet restore GiftOfTheGivers.sln
-  displayName: 'Restore dependencies'
-
-# 3. Build Solution
-- script: dotnet build GiftOfTheGivers.sln --configuration $(buildConfiguration) --no-restore
-  displayName: 'Build solution'
-
-# 4. Run Automated Tests (from Section B)
-- script: dotnet test GiftOfTheGivers.sln --configuration $(buildConfiguration) --no-build --logger "trx"
-  displayName: 'Run automated tests'
-
-# ==========================================
-# SECTION C: CONTINUOUS DEPLOYMENT TASKS
-# ==========================================
-
-# 5. Publish Web App to a folder
+# 2. Restore NuGet Dependencies
 - task: DotNetCoreCLI@2
-  displayName: 'Publish ASP.NET Core Web App'
+  displayName: 'Restore Dependencies'
   inputs:
-    command: 'publish'
-    publishWebProjects: true
-    arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/Web'
+    command: 'restore'
+    projects: '**/*.slnx'
 
-# 6. Deploy Web App to Azure App Service (Section C.1)
-- task: AzureWebApp@1
-  displayName: 'Deploy to Azure App Service'
-  inputs:
-    azureSubscription: 'Azure for Students' # Or the exact name of your Azure service connection in DevOps
-    appType: 'webApp'
-    appName: 'GiftOfGivers2026' # Match the exact name of your Azure App Service from Part 1
-    package: '$(Build.ArtifactStagingDirectory)/Web/**/*.zip'
-
-# 7. Publish Azure Functions Project (Section C.2)
+# 3. Build the Entire Solution
 - task: DotNetCoreCLI@2
-  displayName: 'Publish Azure Functions'
+  displayName: 'Build Solution'
   inputs:
-    command: 'publish'
-    projects: '**/DonationFunctionApp.csproj' # Make sure this matches your function project folder/name
-    arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/Functions'
+    command: 'build'
+    projects: '**/*.slnx'
+    arguments: '--configuration $(buildConfiguration)'
 
-# 8. Deploy Function App to Azure (Section C.2)
-- task: AzureFunctionApp@1
-  displayName: 'Deploy to Azure Function App'
+# 4. Run Automated Tests (Unit, Integration, Selenium)
+- task: DotNetCoreCLI@2
+  displayName: 'Run All Tests (Section B)'
   inputs:
-    azureSubscription: 'Azure for Students'
-    appType: 'functionApp'
-    appName: 'DonationFunctionApp' # Match your Azure Function App name
-    package: '$(Build.ArtifactStagingDirectory)/Functions/**/*.zip'
+    command: 'test'
+    projects: 'GiftOfTheGivers.Tests/GiftOfTheGivers.Tests.csproj'
+    arguments: '--configuration $(buildConfiguration) --logger trx'
+    publishTestResults: true
+
+# 5. Publish Test Results to Azure DevOps Pipeline Summary
+- task: PublishTestResults@2
+  displayName: 'Publish Test Results'
+  inputs:
+    testResultsFormat: 'VSTest'
+    testResultsFiles: '**/*.trx'
+    failTaskOnFailedTests: true
