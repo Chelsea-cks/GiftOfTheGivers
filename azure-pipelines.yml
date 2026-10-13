@@ -1,5 +1,4 @@
 trigger:
-  - main
   - master
 
 pool:
@@ -8,43 +7,84 @@ pool:
 variables:
   buildConfiguration: 'Release'
 
-steps:
-# 1. Install .NET SDK
-- task: UseDotNet@2
-  displayName: 'Install .NET SDK'
-  inputs:
-    packageType: 'sdk'
-    version: '10.x' # Uses .NET 10 to match your project target framework
-    includePreviewVersions: true
+stages:
+- stage: BuildAndTest
+  displayName: 'Build and Test Stage'
+  jobs:
+  - job: BuildAndTestJob
+    displayName: 'Build, Test, and Publish Artifacts'
+    steps:
+    - task: UseDotNet@2
+      displayName: 'Install .NET SDK'
+      inputs:
+        packageType: 'sdk'
+        version: '8.0.x'
 
-# 2. Restore NuGet Dependencies
-- task: DotNetCoreCLI@2
-  displayName: 'Restore Dependencies'
-  inputs:
-    command: 'restore'
-    projects: '**/*.slnx'
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore Dependencies'
+      inputs:
+        command: 'restore'
+        projects: '**/*.csproj'
 
-# 3. Build the Entire Solution
-- task: DotNetCoreCLI@2
-  displayName: 'Build Solution'
-  inputs:
-    command: 'build'
-    projects: '**/*.slnx'
-    arguments: '--configuration $(buildConfiguration)'
+    - task: DotNetCoreCLI@2
+      displayName: 'Build Solution'
+      inputs:
+        command: 'build'
+        projects: '**/*.csproj'
+        arguments: '--configuration $(buildConfiguration)'
 
-# 4. Run Automated Tests (Unit, Integration, Selenium)
-- task: DotNetCoreCLI@2
-  displayName: 'Run All Tests (Section B)'
-  inputs:
-    command: 'test'
-    projects: 'GiftOfTheGivers.Tests/GiftOfTheGivers.Tests.csproj'
-    arguments: '--configuration $(buildConfiguration) --logger trx'
-    publishTestResults: true
+    - task: DotNetCoreCLI@2
+      displayName: 'Run All Tests'
+      inputs:
+        command: 'test'
+        projects: '**/*Tests/*.csproj'
+        arguments: '--configuration $(buildConfiguration) --logger trx'
 
-# 5. Publish Test Results to Azure DevOps Pipeline Summary
-- task: PublishTestResults@2
-  displayName: 'Publish Test Results'
-  inputs:
-    testResultsFormat: 'VSTest'
-    testResultsFiles: '**/*.trx'
-    failTaskOnFailedTests: true
+    - task: PublishTestResults@2
+      displayName: 'Publish Test Results'
+      condition: succeededOrFailed()
+      inputs:
+        testResultsFormat: 'VSTest'
+        testResultsFiles: '**/*.trx'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish Web App Artifact'
+      inputs:
+        command: 'publish'
+        publishWebProjects: true
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/Web'
+        zipAfterPublish: true
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Upload Artifact to Pipeline'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)/Web'
+        ArtifactName: 'GiftOfTheGiversRelease'
+        publishLocation: 'Container'
+
+- stage: DeployToStaging
+  displayName: 'Deployment Stage (Section C)'
+  dependsOn: BuildAndTest
+  jobs:
+  - deployment: DeployStagingJob
+    displayName: 'Deploy to Local Staging Environment'
+    environment: 'Staging'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: 'GiftOfTheGiversRelease'
+          
+          - task: PowerShell@2
+            displayName: 'Extract and Deploy Application Files'
+            inputs:
+              targetType: 'inline'
+              script: |
+                $destination = "C:\inetpub\wwwroot\GiftOfTheGivers"
+                if (!(Test-Path $destination)) {
+                    New-Item -ItemType Directory -Force -Path $destination
+                }
+                Write-Host "Deploying build artifacts to $destination..."
+                Expand-Archive -Path "$(Pipeline.Workspace)\GiftOfTheGiversRelease\*.zip" -DestinationPath $destination -Force
+                Write-Host "Deployment completed successfully!"
