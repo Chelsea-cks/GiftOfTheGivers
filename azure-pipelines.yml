@@ -24,13 +24,13 @@ stages:
       displayName: 'Restore Dependencies'
       inputs:
         command: 'restore'
-        projects: 'GiftOfTheGivers/GiftOfTheGivers.csproj'
+        projects: '**/*.csproj'
 
     - task: DotNetCoreCLI@2
       displayName: 'Build Solution'
       inputs:
         command: 'build'
-        projects: 'GiftOfTheGivers/GiftOfTheGivers.csproj'
+        projects: '**/*.csproj'
         arguments: '--configuration $(buildConfiguration)'
 
     - task: DotNetCoreCLI@2
