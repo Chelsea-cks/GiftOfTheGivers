@@ -62,25 +62,23 @@ stages:
         ArtifactName: 'GiftOfTheGiversRelease'
         publishLocation: 'Container'
 
+-
 - stage: DeployToStaging
-  displayName: 'Deployment Stage (Section C)'
+  displayName: 'Deploy to Azure App Service'
   dependsOn: BuildAndTest
+  condition: succeeded()
   jobs:
-  - job: DeployStagingJob
-    displayName: 'Deploy to Local Staging Folder'
+  - job: DeployWebApp
+    displayName: 'Deploy Gift of the Givers Web App'
     steps:
     - download: current
       artifact: 'GiftOfTheGiversRelease'
-    
-    - task: PowerShell@2
-      displayName: 'Extract and Deploy Files'
+
+    - task: AzureWebApp@1
+      displayName: 'Deploy to Azure Web App'
       inputs:
-        targetType: 'inline'
-        script: |
-          $destination = "C:\Deployment\GiftOfTheGivers"
-          if (!(Test-Path $destination)) {
-              New-Item -ItemType Directory -Force -Path $destination
-          }
-          Write-Host "Deploying build artifacts to $destination..."
-          Expand-Archive -Path "$(Pipeline.Workspace)\GiftOfTheGiversRelease\*.zip" -DestinationPath $destination -Force
-          Write-Host "Deployment completed successfully!"
+        azureSubscription: 'GiftOfTheGivers-Azure-Connection'
+        appType: 'webAppLinux'
+        appName: 'giftofthegivers-disaster-relief-4827'
+        package: '$(Pipeline.Workspace)/GiftOfTheGiversRelease/**/*.zip'
+        deploymentMethod: 'zipDeploy'
