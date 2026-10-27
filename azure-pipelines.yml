@@ -18,7 +18,7 @@ stages:
       displayName: 'Install .NET SDK'
       inputs:
         packageType: 'sdk'
-        version: '8.0.x'
+        version: '10.0.x'
 
     - task: DotNetCoreCLI@2
       displayName: 'Restore Dependencies'
@@ -62,7 +62,6 @@ stages:
         ArtifactName: 'GiftOfTheGiversRelease'
         publishLocation: 'Container'
 
--
 - stage: DeployToStaging
   displayName: 'Deploy to Azure App Service'
   dependsOn: BuildAndTest
