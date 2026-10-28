@@ -47,39 +47,47 @@ stages:
           script: |
             $project = "$(Build.SourcesDirectory)\GiftOfTheGivers\GiftOfTheGivers.csproj"
             $log = "$(Agent.TempDirectory)\webapp-test.log"
+            $errorLog = "$(Agent.TempDirectory)\webapp-test-error.log"
+
+            dotnet build $project --configuration Release
+
+            if ($LASTEXITCODE -ne 0) {
+              throw "Application build failed."
+            }
+
+            $dll = "$(Build.SourcesDirectory)\GiftOfTheGivers\bin\Release\net10.0\GiftOfTheGivers.dll"
+
+            if (-not (Test-Path $dll)) {
+              throw "Application DLL not found at $dll"
+            }
 
             $process = Start-Process dotnet `
-              -ArgumentList "run --project `"$project`" --no-build --urls http://localhost:5110" `
+              -ArgumentList "`"$dll`" --urls http://localhost:5110" `
               -PassThru `
               -RedirectStandardOutput $log `
-              -RedirectStandardError "$(Agent.TempDirectory)\webapp-test-error.log"
+              -RedirectStandardError $errorLog
 
             $ready = $false
 
             for ($i = 0; $i -lt 30; $i++) {
               Start-Sleep -Seconds 2
-
               try {
-                $response = Invoke-WebRequest `
-                  -Uri "http://localhost:5110" `
-                  -TimeoutSec 2
-
+                $response = Invoke-WebRequest -Uri "http://localhost:5110" -TimeoutSec 2
                 if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
                   $ready = $true
                   break
                 }
               }
-              catch {
-                # The app may still be starting.
-              }
+              catch {}
             }
 
             if (-not $ready) {
               Get-Content $log -ErrorAction SilentlyContinue
-              Get-Content "$(Agent.TempDirectory)\webapp-test-error.log" -ErrorAction SilentlyContinue
+              Get-Content $errorLog -ErrorAction SilentlyContinue
               throw "The web app did not start at http://localhost:5110."
             }
 
+    
     - task: DotNetCoreCLI@2
       displayName: 'Run All Tests'
       inputs:
