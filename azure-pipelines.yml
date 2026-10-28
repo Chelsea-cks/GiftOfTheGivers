@@ -62,7 +62,6 @@ stages:
         ArtifactName: 'GiftOfTheGiversRelease'
         publishLocation: 'Container'
 
--
 - stage: DeployToStaging
   displayName: 'Deploy to Azure App Service'
   dependsOn: BuildAndTest
