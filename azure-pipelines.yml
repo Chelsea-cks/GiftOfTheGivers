@@ -1,3 +1,4 @@
+
 trigger:
   - master
 
@@ -21,12 +22,6 @@ stages:
         version: '10.0.x'
 
     - task: DotNetCoreCLI@2
-      displayName: 'Restore Dependencies'
-      inputs:
-        command: 'restore'
-        projects: '**/*.csproj'
-
-    - task: DotNetCoreCLI@2
       displayName: 'Restore Application'
       inputs:
         command: 'restore'
@@ -39,76 +34,102 @@ stages:
         projects: 'GiftOfTheGivers/GiftOfTheGivers.csproj'
         arguments: '--configuration $(buildConfiguration) --no-restore'
 
-
     - task: PowerShell@2
       displayName: 'Start Web App for Selenium Tests'
       inputs:
-          targetType: 'inline'
-          script: |
-            $project = "$(Build.SourcesDirectory)\GiftOfTheGivers\GiftOfTheGivers.csproj"
-            $log = "$(Agent.TempDirectory)\webapp-test.log"
-            $errorLog = "$(Agent.TempDirectory)\webapp-test-error.log"
+        targetType: 'inline'
+        script: |
+          $project = "$(Build.SourcesDirectory)\GiftOfTheGivers\GiftOfTheGivers.csproj"
+          $log = "$(Agent.TempDirectory)\webapp-test.log"
+          $errorLog = "$(Agent.TempDirectory)\webapp-test-error.log"
+          $dll = "$(Build.SourcesDirectory)\GiftOfTheGivers\bin\Release\net10.0\GiftOfTheGivers.dll"
 
-            dotnet build $project --configuration Release
+          if (-not (Test-Path $dll)) {
+            throw "Application DLL not found: $dll"
+          }
 
-            if ($LASTEXITCODE -ne 0) {
-              throw "Application build failed."
+          $env:DatabaseProvider = "Sqlite"
+          $env:ConnectionStrings__DefaultConnection = "Data Source=$(Agent.TempDirectory)\GiftOfTheGivers-Selenium.db"
+          $env:ASPNETCORE_ENVIRONMENT = "Development"
+
+          $process = Start-Process dotnet `
+            -ArgumentList "`"$dll`" --urls http://localhost:5110" `
+            -PassThru `
+            -RedirectStandardOutput $log `
+            -RedirectStandardError $errorLog
+
+          $ready = $false
+
+          for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Seconds 2
+
+            if ($process.HasExited) {
+              Write-Host "Web application exited with code $($process.ExitCode)."
+              break
             }
 
-            $dll = "$(Build.SourcesDirectory)\GiftOfTheGivers\bin\Release\net10.0\GiftOfTheGivers.dll"
+            try {
+              $response = Invoke-WebRequest `
+                -Uri "http://localhost:5110/" `
+                -UseBasicParsing `
+                -TimeoutSec 5 `
+                -ErrorAction Stop
 
-            if (-not (Test-Path $dll)) {
-              throw "Application DLL not found at $dll"
-            }
-            $env:DatabaseProvider = "Sqlite"
-            $env:ConnectionStrings__DefaultConnection = "Data Source=$(Agent.TempDirectory)\GiftOfTheGivers-Selenium.db"
-
-            $process = Start-Process dotnet `
-              -ArgumentList "`"$dll`" --urls http://localhost:5110" `
-              -PassThru `
-              -RedirectStandardOutput $log `
-              -RedirectStandardError $errorLog
-
-            $ready = $false
-
-            for ($i = 0; $i -lt 30; $i++) {
-              Start-Sleep -Seconds 2
-              try {
-                $response = Invoke-WebRequest -Uri "http://localhost:5110" -TimeoutSec 2
-                if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
-                  $ready = $true
-                  break
-                }
+              if ($response.StatusCode -eq 200) {
+                $ready = $true
+                Write-Host "Web app is ready. HTTP status: 200"
+                break
               }
-              catch {}
             }
-
-            if (-not $ready) {
-              Get-Content $log -ErrorAction SilentlyContinue
-              Get-Content $errorLog -ErrorAction SilentlyContinue
-              throw "The web app did not start at http://localhost:5110."
+            catch {
+              Write-Host "Waiting for web app..."
             }
+          }
 
-    
+          if (-not $ready) {
+            Get-Content $log -ErrorAction SilentlyContinue
+            Get-Content $errorLog -ErrorAction SilentlyContinue
+            throw "The web app did not become ready at http://localhost:5110/."
+          }
+
     - task: DotNetCoreCLI@2
       displayName: 'Run All Tests'
       inputs:
         command: 'test'
         projects: 'GiftOfTheGivers.Tests/GiftOfTheGivers.Tests.csproj'
-        arguments: '--configuration $(buildConfiguration) --no-build'
+        arguments: '--configuration $(buildConfiguration) --logger "trx;LogFileName=GiftOfTheGivers-Tests.trx"'
 
     - task: PublishTestResults@2
       displayName: 'Publish Test Results'
       condition: succeededOrFailed()
       inputs:
         testResultsFormat: 'VSTest'
-        testResultsFiles: '**/*.trx'
+        testResultsFiles: '**/GiftOfTheGivers-Tests.trx'
+        failTaskOnFailedTests: false
+        failTaskOnMissingResultsFile: false
+
+    - task: PowerShell@2
+      displayName: 'Stop Test Web App'
+      condition: always()
+      inputs:
+        targetType: 'inline'
+        script: |
+          $processes = Get-CimInstance Win32_Process |
+            Where-Object {
+              $_.Name -eq 'dotnet.exe' -and
+              $_.CommandLine -like '*GiftOfTheGivers.dll*'
+            }
+
+          foreach ($item in $processes) {
+            Stop-Process -Id $item.ProcessId -Force -ErrorAction SilentlyContinue
+          }
 
     - task: DotNetCoreCLI@2
-      displayName: 'Publish Web App Artifact'
+      displayName: 'Publish Web App'
       inputs:
         command: 'publish'
-        publishWebProjects: true
+        publishWebProjects: false
+        projects: 'GiftOfTheGivers/GiftOfTheGivers.csproj'
         arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/Web'
         zipAfterPublish: true
 
