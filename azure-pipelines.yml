@@ -27,11 +27,17 @@ stages:
         projects: '**/*.csproj'
 
     - task: DotNetCoreCLI@2
-      displayName: 'Build Solution'
+      displayName: 'Restore Application'
+      inputs:
+        command: 'restore'
+        projects: 'GiftOfTheGivers/GiftOfTheGivers.csproj'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Build Application'
       inputs:
         command: 'build'
-        projects: '**/*.csproj'
-        arguments: '--configuration $(buildConfiguration)'
+        projects: 'GiftOfTheGivers/GiftOfTheGivers.csproj'
+        arguments: '--configuration $(buildConfiguration) --no-restore'
 
     - task: DotNetCoreCLI@2
       displayName: 'Run All Tests'
