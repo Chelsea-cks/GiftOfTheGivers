@@ -2,7 +2,7 @@ trigger:
   - master
 
 pool:
-  vmImage: 'ubuntu-latest'
+  name: 'Chelsea-Windows-Agent'
 
 variables:
   buildConfiguration: 'Release'
