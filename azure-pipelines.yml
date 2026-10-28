@@ -60,6 +60,8 @@ stages:
             if (-not (Test-Path $dll)) {
               throw "Application DLL not found at $dll"
             }
+            $env:DatabaseProvider = "Sqlite"
+            $env:ConnectionStrings__DefaultConnection = "Data Source=$(Agent.TempDirectory)\GiftOfTheGivers-Selenium.db"
 
             $process = Start-Process dotnet `
               -ArgumentList "`"$dll`" --urls http://localhost:5110" `
