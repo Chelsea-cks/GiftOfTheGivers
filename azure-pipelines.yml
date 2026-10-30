@@ -126,6 +126,14 @@ stages:
         failTaskOnFailedTests: false
         failTaskOnMissingResultsFile: false
 
+    - task: PublishPipelineArtifact@1
+      displayName: 'Save Selenium Test Results'
+      condition: succeededOrFailed()
+      inputs:
+          targetPath: '$(Agent.TempDirectory)\GiftOfTheGivers-Tests.trx'
+          artifact: 'SeleniumTestResults'
+          publishLocation: 'pipeline'
+
     - task: PowerShell@2
       displayName: 'Stop Test Web App'
       condition: always()
