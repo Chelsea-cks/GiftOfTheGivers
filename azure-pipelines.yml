@@ -15,18 +15,22 @@ stages:
   - job: BuildAndTestJob
     displayName: 'Build, Test, and Publish Artifacts'
     steps:
+
+    # 1. Install .NET 10 SDK
     - task: UseDotNet@2
       displayName: 'Install .NET SDK'
       inputs:
         packageType: 'sdk'
         version: '10.0.x'
 
+    # 2. Restore application dependencies
     - task: DotNetCoreCLI@2
       displayName: 'Restore Application'
       inputs:
         command: 'restore'
         projects: 'GiftOfTheGivers/GiftOfTheGivers.csproj'
 
+    # 3. Build the main application
     - task: DotNetCoreCLI@2
       displayName: 'Build Application'
       inputs:
@@ -34,12 +38,20 @@ stages:
         projects: 'GiftOfTheGivers/GiftOfTheGivers.csproj'
         arguments: '--configuration $(buildConfiguration) --no-restore'
 
+    # 4. Build the test project BEFORE starting the website
+    - task: DotNetCoreCLI@2
+      displayName: 'Build Test Project'
+      inputs:
+        command: 'build'
+        projects: 'GiftOfTheGivers.Tests/GiftOfTheGivers.Tests.csproj'
+        arguments: '--configuration $(buildConfiguration)'
+
+    # 5. Start the application for Selenium
     - task: PowerShell@2
       displayName: 'Start Web App for Selenium Tests'
       inputs:
         targetType: 'inline'
         script: |
-          $project = "$(Build.SourcesDirectory)\GiftOfTheGivers\GiftOfTheGivers.csproj"
           $log = "$(Agent.TempDirectory)\webapp-test.log"
           $errorLog = "$(Agent.TempDirectory)\webapp-test-error.log"
           $dll = "$(Build.SourcesDirectory)\GiftOfTheGivers\bin\Release\net10.0\GiftOfTheGivers.dll"
@@ -53,10 +65,12 @@ stages:
           $env:ASPNETCORE_ENVIRONMENT = "Development"
 
           $process = Start-Process dotnet `
-            -ArgumentList "`"$dll`" --urls http://localhost:5110" `
+            -ArgumentList "`"$dll`" --urls http://127.0.0.1:5110" `
             -PassThru `
             -RedirectStandardOutput $log `
             -RedirectStandardError $errorLog
+
+          $process.Id | Set-Content "$(Agent.TempDirectory)\webapp-test.pid"
 
           $ready = $false
 
@@ -70,7 +84,7 @@ stages:
 
             try {
               $response = Invoke-WebRequest `
-                -Uri "http://localhost:5110/" `
+                -Uri "http://127.0.0.1:5110/" `
                 -UseBasicParsing `
                 -TimeoutSec 5 `
                 -ErrorAction Stop
@@ -87,69 +101,58 @@ stages:
           }
 
           if (-not $ready) {
+            Write-Host "Application output:"
             Get-Content $log -ErrorAction SilentlyContinue
+            Write-Host "Application errors:"
             Get-Content $errorLog -ErrorAction SilentlyContinue
-            throw "The web app did not become ready at http://localhost:5110/."
-          }
-          
-    - task: PowerShell@2
-      displayName: 'Stop Test Web App Before Testing'
-      inputs:
-        targetType: 'inline'
-        script: |
-          $processes = Get-CimInstance Win32_Process |
-            Where-Object {
-              $_.Name -eq 'dotnet.exe' -and
-              $_.CommandLine -like '*GiftOfTheGivers.dll*'
+            throw "The web app did not become ready at http://127.0.0.1:5110/."
           }
 
-          foreach ($process in $processes) {
-            Write-Host "Stopping test web app process ID $($process.ProcessId)"
-            Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
-          }
-
-          Start-Sleep -Seconds 2
-
+    # 6. Run Selenium and other tests WITHOUT rebuilding
     - task: DotNetCoreCLI@2
       displayName: 'Run All Tests'
       inputs:
         command: 'test'
         projects: 'GiftOfTheGivers.Tests/GiftOfTheGivers.Tests.csproj'
-        arguments: '--configuration $(buildConfiguration) --logger "trx;LogFileName=GiftOfTheGivers-Tests.trx"'
+        arguments: '--configuration $(buildConfiguration) --no-build --logger "trx;LogFileName=GiftOfTheGivers-Tests.trx"'
 
+    # 7. Publish test results even if tests fail
     - task: PublishTestResults@2
       displayName: 'Publish Test Results'
       condition: succeededOrFailed()
       inputs:
         testResultsFormat: 'VSTest'
         testResultsFiles: '**/GiftOfTheGivers-Tests.trx'
+        searchFolder: '$(Agent.TempDirectory)'
         failTaskOnFailedTests: false
         failTaskOnMissingResultsFile: false
 
+    # 8. Save the TRX file as a downloadable artifact
     - task: PublishPipelineArtifact@1
       displayName: 'Save Selenium Test Results'
       condition: succeededOrFailed()
       inputs:
-          targetPath: '$(Agent.TempDirectory)\GiftOfTheGivers-Tests.trx'
-          artifact: 'SeleniumTestResults'
-          publishLocation: 'pipeline'
+        targetPath: '$(Agent.TempDirectory)\GiftOfTheGivers-Tests.trx'
+        artifact: 'SeleniumTestResults'
+        publishLocation: 'pipeline'
 
+    # 9. Stop the website AFTER the tests
     - task: PowerShell@2
       displayName: 'Stop Test Web App'
       condition: always()
       inputs:
         targetType: 'inline'
         script: |
-          $processes = Get-CimInstance Win32_Process |
-            Where-Object {
-              $_.Name -eq 'dotnet.exe' -and
-              $_.CommandLine -like '*GiftOfTheGivers.dll*'
-            }
+          $pidFile = "$(Agent.TempDirectory)\webapp-test.pid"
 
-          foreach ($item in $processes) {
-            Stop-Process -Id $item.ProcessId -Force -ErrorAction SilentlyContinue
+          if (Test-Path $pidFile) {
+            $appProcessId = [int](Get-Content $pidFile)
+            Stop-Process -Id $appProcessId -Force -ErrorAction SilentlyContinue
+            Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+            Write-Host "Test web application stopped."
           }
 
+    # 10. Publish the application
     - task: DotNetCoreCLI@2
       displayName: 'Publish Web App'
       inputs:
@@ -159,6 +162,7 @@ stages:
         arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/Web'
         zipAfterPublish: true
 
+    # 11. Upload deployment artifact
     - task: PublishBuildArtifacts@1
       displayName: 'Upload Artifact to Pipeline'
       inputs:
@@ -166,6 +170,7 @@ stages:
         ArtifactName: 'GiftOfTheGiversRelease'
         publishLocation: 'Container'
 
+# DEPLOYMENT STAGE
 - stage: DeployToStaging
   displayName: 'Deploy to Azure App Service'
   dependsOn: BuildAndTest
@@ -174,6 +179,7 @@ stages:
   - job: DeployWebApp
     displayName: 'Deploy Gift of the Givers Web App'
     steps:
+
     - download: current
       artifact: 'GiftOfTheGiversRelease'
 
