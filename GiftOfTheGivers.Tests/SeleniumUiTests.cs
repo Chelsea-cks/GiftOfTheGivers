@@ -23,15 +23,25 @@ namespace GiftOfTheGivers.Tests
             _driver.Manage().Timeouts().ImplicitWait = TimeSpan.FromSeconds(10);
         }
 
+
         [Fact]
         public void HomePage_LoadsSuccessfully_AndHasCorrectTitle()
         {
-            // Act
-            _driver.Navigate().GoToUrl(_baseUrl);
-
-            // Assert
-            Assert.Contains("Gift", _driver.Title, StringComparison.OrdinalIgnoreCase);
+            try
+            {
+                _driver.Navigate().GoToUrl(_baseUrl);
+                Assert.Contains("Gift", _driver.Title, StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Selenium navigation failed for URL: {_baseUrl}");
+                Console.WriteLine($"Exception type: {ex.GetType().FullName}");
+                Console.WriteLine($"Exception message: {ex.Message}");
+                Console.WriteLine(ex.ToString());
+                throw;
+            }
         }
+
 
         [Fact]
         public void Navigation_ToDonationPage_FunctionsCorrectly()
