@@ -9,37 +9,67 @@ variables:
   buildConfiguration: 'Release'
 
 stages:
+
+# STAGE 1: BUILD, TEST AND PUBLISH
+
 - stage: BuildAndTest
-  displayName: 'Build and Test Stage'
+  displayName: 'Build, Test and Publish Artifacts'
   jobs:
   - job: BuildAndTestJob
-    displayName: 'Build, Test, and Publish Artifacts'
+    displayName: 'Build Web App and Azure Functions'
     steps:
+
+    # 1. Install .NET 10 SDK
     - task: UseDotNet@2
       displayName: 'Install .NET SDK'
       inputs:
         packageType: 'sdk'
         version: '10.0.x'
 
+    # 2. Restore Web App
     - task: DotNetCoreCLI@2
-      displayName: 'Restore Application'
+      displayName: 'Restore Web App'
       inputs:
         command: 'restore'
         projects: 'GiftOfTheGivers/GiftOfTheGivers.csproj'
 
+    # 3. Build Web App
     - task: DotNetCoreCLI@2
-      displayName: 'Build Application'
+      displayName: 'Build Web App'
       inputs:
         command: 'build'
         projects: 'GiftOfTheGivers/GiftOfTheGivers.csproj'
         arguments: '--configuration $(buildConfiguration) --no-restore'
 
+    # 4. Restore Azure Functions
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore Azure Functions'
+      inputs:
+        command: 'restore'
+        projects: 'GiftOfTheGivers.csproj'
+
+    # 5. Build Azure Functions
+    - task: DotNetCoreCLI@2
+      displayName: 'Build Azure Functions'
+      inputs:
+        command: 'build'
+        projects: 'GiftOfTheGivers.csproj'
+        arguments: '--configuration $(buildConfiguration) --no-restore'
+
+    # 6. Build Test Project
+    - task: DotNetCoreCLI@2
+      displayName: 'Build Test Project'
+      inputs:
+        command: 'build'
+        projects: 'GiftOfTheGivers.Tests/GiftOfTheGivers.Tests.csproj'
+        arguments: '--configuration $(buildConfiguration)'
+
+    # 7. Start Web App for Selenium Tests
     - task: PowerShell@2
       displayName: 'Start Web App for Selenium Tests'
       inputs:
         targetType: 'inline'
         script: |
-          $project = "$(Build.SourcesDirectory)\GiftOfTheGivers\GiftOfTheGivers.csproj"
           $log = "$(Agent.TempDirectory)\webapp-test.log"
           $errorLog = "$(Agent.TempDirectory)\webapp-test-error.log"
           $dll = "$(Build.SourcesDirectory)\GiftOfTheGivers\bin\Release\net10.0\GiftOfTheGivers.dll"
@@ -53,10 +83,12 @@ stages:
           $env:ASPNETCORE_ENVIRONMENT = "Development"
 
           $process = Start-Process dotnet `
-            -ArgumentList "`"$dll`" --urls http://localhost:5110" `
+            -ArgumentList "`"$dll`" --urls http://127.0.0.1:5110" `
             -PassThru `
             -RedirectStandardOutput $log `
             -RedirectStandardError $errorLog
+
+          $process.Id | Set-Content "$(Agent.TempDirectory)\webapp-test.pid"
 
           $ready = $false
 
@@ -70,14 +102,14 @@ stages:
 
             try {
               $response = Invoke-WebRequest `
-                -Uri "http://localhost:5110/" `
+                -Uri "http://127.0.0.1:5110/" `
                 -UseBasicParsing `
                 -TimeoutSec 5 `
                 -ErrorAction Stop
 
               if ($response.StatusCode -eq 200) {
                 $ready = $true
-                Write-Host "Web app is ready. HTTP status: 200"
+                Write-Host "Web app is ready."
                 break
               }
             }
@@ -87,61 +119,49 @@ stages:
           }
 
           if (-not $ready) {
+            Write-Host "Application output:"
             Get-Content $log -ErrorAction SilentlyContinue
+            Write-Host "Application errors:"
             Get-Content $errorLog -ErrorAction SilentlyContinue
-            throw "The web app did not become ready at http://localhost:5110/."
-          }
-          
-    - task: PowerShell@2
-      displayName: 'Stop Test Web App Before Testing'
-      inputs:
-        targetType: 'inline'
-        script: |
-          $processes = Get-CimInstance Win32_Process |
-            Where-Object {
-              $_.Name -eq 'dotnet.exe' -and
-              $_.CommandLine -like '*GiftOfTheGivers.dll*'
+            throw "The web app did not become ready."
           }
 
-          foreach ($process in $processes) {
-            Write-Host "Stopping test web app process ID $($process.ProcessId)"
-            Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
-          }
-
-          Start-Sleep -Seconds 2
-
+    # 8. Run Tests
     - task: DotNetCoreCLI@2
       displayName: 'Run All Tests'
       inputs:
         command: 'test'
         projects: 'GiftOfTheGivers.Tests/GiftOfTheGivers.Tests.csproj'
-        arguments: '--configuration $(buildConfiguration) --logger "trx;LogFileName=GiftOfTheGivers-Tests.trx"'
+        arguments: '--configuration $(buildConfiguration) --no-build --logger "trx;LogFileName=GiftOfTheGivers-Tests.trx" --results-directory "$(Agent.TempDirectory)\TestResults"'
 
+    # 9. Publish Test Results
     - task: PublishTestResults@2
       displayName: 'Publish Test Results'
       condition: succeededOrFailed()
       inputs:
         testResultsFormat: 'VSTest'
         testResultsFiles: '**/GiftOfTheGivers-Tests.trx'
+        searchFolder: '$(Agent.TempDirectory)\TestResults'
         failTaskOnFailedTests: false
         failTaskOnMissingResultsFile: false
 
+    # 10. Stop Test Web App
     - task: PowerShell@2
       displayName: 'Stop Test Web App'
       condition: always()
       inputs:
         targetType: 'inline'
         script: |
-          $processes = Get-CimInstance Win32_Process |
-            Where-Object {
-              $_.Name -eq 'dotnet.exe' -and
-              $_.CommandLine -like '*GiftOfTheGivers.dll*'
-            }
+          $pidFile = "$(Agent.TempDirectory)\webapp-test.pid"
 
-          foreach ($item in $processes) {
-            Stop-Process -Id $item.ProcessId -Force -ErrorAction SilentlyContinue
+          if (Test-Path $pidFile) {
+            $appProcessId = [int](Get-Content $pidFile)
+            Stop-Process -Id $appProcessId -Force -ErrorAction SilentlyContinue
+            Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+            Write-Host "Test web application stopped."
           }
 
+    # 11. Publish Web App
     - task: DotNetCoreCLI@2
       displayName: 'Publish Web App'
       inputs:
@@ -151,21 +171,45 @@ stages:
         arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/Web'
         zipAfterPublish: true
 
-    - task: PublishBuildArtifacts@1
-      displayName: 'Upload Artifact to Pipeline'
+    # 12. Upload Web App Artifact
+    - task: PublishPipelineArtifact@1
+      displayName: 'Upload Web App Artifact'
       inputs:
-        PathtoPublish: '$(Build.ArtifactStagingDirectory)/Web'
-        ArtifactName: 'GiftOfTheGiversRelease'
-        publishLocation: 'Container'
+        targetPath: '$(Build.ArtifactStagingDirectory)/Web'
+        artifact: 'GiftOfTheGiversRelease'
+        publishLocation: 'pipeline'
+
+    # 13. Publish Azure Functions
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish Azure Functions'
+      inputs:
+        command: 'publish'
+        publishWebProjects: false
+        projects: 'GiftOfTheGivers.csproj'
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/Functions'
+        zipAfterPublish: true
+
+    # 14. Upload Functions Artifact
+    - task: PublishPipelineArtifact@1
+      displayName: 'Upload Functions Artifact'
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)/Functions'
+        artifact: 'GiftOfTheGiversFunctions'
+        publishLocation: 'pipeline'
+
+
+
+# STAGE 2: C.1 WEB APP DEPLOYMENT
 
 - stage: DeployToStaging
-  displayName: 'Deploy to Azure App Service'
+  displayName: 'C.1 - Deploy Azure Web App'
   dependsOn: BuildAndTest
   condition: succeeded()
   jobs:
   - job: DeployWebApp
     displayName: 'Deploy Gift of the Givers Web App'
     steps:
+
     - download: current
       artifact: 'GiftOfTheGiversRelease'
 
@@ -176,4 +220,28 @@ stages:
         appType: 'webAppLinux'
         appName: 'giftofthegivers-disaster-relief-4827'
         package: '$(Pipeline.Workspace)/GiftOfTheGiversRelease/**/*.zip'
+        deploymentMethod: 'zipDeploy'
+
+
+# STAGE 3: C.2 AZURE FUNCTIONS DEPLOYMENT
+
+- stage: DeployFunctions
+  displayName: 'C.2 - Deploy Azure Functions'
+  dependsOn: BuildAndTest
+  condition: succeeded()
+  jobs:
+  - job: DeployFunctionApp
+    displayName: 'Deploy Gift of the Givers Functions'
+    steps:
+
+    - download: current
+      artifact: 'GiftOfTheGiversFunctions'
+
+    - task: AzureFunctionApp@2
+      displayName: 'Deploy to Azure Function App'
+      inputs:
+        azureSubscription: 'GiftOfTheGivers-Azure-Connection'
+        appType: 'functionAppLinux'
+        appName: 'giftotgivers-functions-4827'
+        package: '$(Pipeline.Workspace)/GiftOfTheGiversFunctions/**/*.zip'
         deploymentMethod: 'zipDeploy'
