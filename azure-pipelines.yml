@@ -213,14 +213,27 @@ stages:
     - download: current
       artifact: 'GiftOfTheGiversRelease'
 
-    - task: AzureWebApp@1
-      displayName: 'Deploy to Azure Web App'
+    - task: AzureCLI@2
+      displayName: 'Deploy to Azure Web App using Azure CLI'
       inputs:
         azureSubscription: 'GiftOfTheGivers-Azure-Connection'
-        appType: 'webAppLinux'
-        appName: 'giftofthegivers-disaster-relief-4827'
-        package: '$(Pipeline.Workspace)/GiftOfTheGiversRelease/**/*.zip'
-        deploymentMethod: 'zipDeploy'
+        scriptType: 'ps'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          $zip = Get-ChildItem "$(Pipeline.Workspace)\GiftOfTheGiversRelease" -Filter "*.zip" -Recurse | Select-Object -First 1
+
+          if (-not $zip) {
+            Write-Error "No deployment ZIP file was found."
+            exit 1
+          }
+
+          Write-Host "Deploying package: $($zip.FullName)"
+
+          az webapp deploy `
+            --resource-group "$(RSG-RCWCCT-ST10398698-SANORTH)" `
+            --name "giftofthegivers-disaster-relief-4827" `
+            --src-path "$($zip.FullName)" `
+            --type zip
 
 
 # STAGE 3: C.2 AZURE FUNCTIONS DEPLOYMENT
