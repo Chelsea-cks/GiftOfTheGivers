@@ -212,7 +212,11 @@ stages:
 
     - download: current
       artifact: 'GiftOfTheGiversRelease'
-
+    - powershell: |
+        Write-Host "Adding Azure CLI to PATH"
+        Write-Host "##vso[task.prependpath]C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin"
+        where.exe az
+      displayName: 'Configure Azure CLI PATH'
     - task: AzureCLI@2
       displayName: 'Deploy to Azure Web App using Azure CLI'
       inputs:
