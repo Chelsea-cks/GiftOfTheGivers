@@ -131,9 +131,9 @@ stages:
       displayName: 'Run All Tests'
       inputs:
         command: 'test'
+        publishTestResults: false
         projects: 'GiftOfTheGivers.Tests/GiftOfTheGivers.Tests.csproj'
-        arguments: '--configuration $(buildConfiguration) --no-build --logger "trx;LogFileName=GiftOfTheGivers-Tests.trx" --results-directory "$(Agent.TempDirectory)\TestResults"'
-
+        arguments: '--configuration $(buildConfiguration) --no-build --results-directory "$(Agent.TempDirectory)\TestResults" --logger "trx;LogFileName=GiftOfTheGivers-Tests.trx"'
     # 9. Publish Test Results
     - task: PublishTestResults@2
       displayName: 'Publish Test Results'
