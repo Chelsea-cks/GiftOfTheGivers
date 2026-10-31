@@ -6,10 +6,15 @@
 		<OutputType>Exe</OutputType>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
+
+		<DefaultItemExcludes>
+			$(DefaultItemExcludes);GiftOfTheGivers/**;GiftOfTheGivers.Tests/**
+		</DefaultItemExcludes>
 	</PropertyGroup>
 
 	<ItemGroup>
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+
 		<PackageReference Include="Microsoft.Azure.Functions.Worker" Version="2.52.0" />
 		<PackageReference Include="Microsoft.Azure.Functions.Worker.OpenTelemetry" Version="1.2.0" />
 		<PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.3" />
