@@ -232,8 +232,6 @@ stages:
         DeploymentType: 'zipDeploy'
 
 
-
-
 # STAGE 3: C.2 AZURE FUNCTIONS DEPLOYMENT
 
 - stage: DeployFunctions
@@ -248,11 +246,52 @@ stages:
     - download: current
       artifact: 'GiftOfTheGiversFunctions'
 
-    - task: AzureFunctionApp@2
-      displayName: 'Deploy to Azure Function App'
+    - task: DownloadSecureFile@1
+      name: functionPublishProfile
+      displayName: 'Download Function App publishing profile'
       inputs:
-        azureSubscription: 'GiftOfTheGivers-Azure-Connection'
-        appType: 'functionAppLinux'
-        appName: 'giftotgivers-functions-4827'
-        package: '$(Pipeline.Workspace)/GiftOfTheGiversFunctions/**/*.zip'
-        deploymentMethod: 'zipDeploy'
+        secureFile: 'GiftOfTheGivers-Disaster-Relief-4827.PublishSettings'
+
+    - powershell: |
+        $profilePath = "$(functionPublishProfile.secureFilePath)"
+        $artifactPath = "$(Pipeline.Workspace)\GiftOfTheGiversFunctions"
+
+        [xml]$profile = Get-Content $profilePath
+
+        $publishProfile = $profile.publishData.publishProfile |
+            Where-Object { $_.publishUrl -match "\.scm\." } |
+            Select-Object -First 1
+
+        if (-not $publishProfile) {
+            throw "Could not find SCM publishing credentials. Check that this is the Function App publishing profile."
+        }
+
+        $scmHost = ($publishProfile.publishUrl -split ":")[0]
+        $zipFile = Get-ChildItem -Path $artifactPath -Filter "*.zip" -Recurse |
+            Select-Object -First 1
+
+        if (-not $zipFile) {
+            throw "Function deployment ZIP file was not found."
+        }
+
+        $pair = "$($publishProfile.userName):$($publishProfile.userPWD)"
+        $bytes = [System.Text.Encoding]::ASCII.GetBytes($pair)
+        $encoded = [Convert]::ToBase64String($bytes)
+
+        $headers = @{
+            Authorization = "Basic $encoded"
+        }
+
+        $deployUrl = "https://$scmHost/api/zipdeploy"
+
+        Write-Host "Deploying Function App package..."
+
+        Invoke-RestMethod `
+            -Uri $deployUrl `
+            -Method POST `
+            -InFile $zipFile.FullName `
+            -ContentType "application/zip" `
+            -Headers $headers
+
+        Write-Host "Function App deployment request submitted."
+      displayName: 'Deploy Functions using publishing profile'
