@@ -209,27 +209,59 @@ stages:
     displayName: 'Deploy Gift of the Givers Web App'
     steps:
 
-    # Download the published Web App artifact
     - download: current
       artifact: 'GiftOfTheGiversRelease'
 
-    # Download the secure publishing profile
     - task: DownloadSecureFile@1
-      name: publishProfile
-      displayName: 'Download Azure publishing profile'
+      name: webPublishProfile
+      displayName: 'Download Web App publishing profile'
       inputs:
         secureFile: 'GiftOfTheGivers-Disaster-Relief-4827.PublishSettings'
 
-    # Deploy using the publishing profile
-    - task: AzureRmWebAppDeployment@4
-      displayName: 'Deploy to Azure Web App using Publish Profile'
-      inputs:
-        ConnectionType: 'PublishProfile'
-        PublishProfilePath: '$(publishProfile.secureFilePath)'
-        WebAppName: 'giftofthegivers-disaster-relief-4827'
-        Package: '$(Pipeline.Workspace)/GiftOfTheGiversRelease/**/*.zip'
-        enableCustomDeployment: true
-        DeploymentType: 'zipDeploy'
+    - powershell: |
+        $profilePath = "$(webPublishProfile.secureFilePath)"
+        $artifactPath = "$(Pipeline.Workspace)\GiftOfTheGiversRelease"
+
+        [xml]$profile = Get-Content $profilePath
+
+        $publishProfile = $profile.publishData.publishProfile |
+            Where-Object { $_.publishUrl -match "\.scm\." } |
+            Select-Object -First 1
+
+        if (-not $publishProfile) {
+            throw "Could not find SCM publishing credentials. Check that this profile belongs to the Web App."
+        }
+
+        $scmHost = ($publishProfile.publishUrl -split ":")[0]
+
+        $zipFile = Get-ChildItem -Path $artifactPath -Filter "*.zip" -Recurse |
+            Select-Object -First 1
+
+        if (-not $zipFile) {
+            throw "Web App deployment ZIP file was not found."
+        }
+
+        $pair = "$($publishProfile.userName):$($publishProfile.userPWD)"
+        $bytes = [System.Text.Encoding]::ASCII.GetBytes($pair)
+        $encoded = [Convert]::ToBase64String($bytes)
+
+        $headers = @{
+            Authorization = "Basic $encoded"
+        }
+
+        $deployUrl = "https://$scmHost/api/zipdeploy"
+
+        Write-Host "Submitting Web App deployment..."
+
+        Invoke-RestMethod `
+            -Uri $deployUrl `
+            -Method POST `
+            -InFile $zipFile.FullName `
+            -ContentType "application/zip" `
+            -Headers $headers
+
+        Write-Host "Web App deployment request submitted."
+      displayName: 'Deploy Web App using publishing profile'
 
 
 # STAGE 3: C.2 AZURE FUNCTIONS DEPLOYMENT
