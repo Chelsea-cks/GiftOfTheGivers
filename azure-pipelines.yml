@@ -198,7 +198,6 @@ stages:
         publishLocation: 'pipeline'
 
 
-
 # STAGE 2: C.1 WEB APP DEPLOYMENT
 
 - stage: DeployToStaging
@@ -210,24 +209,29 @@ stages:
     displayName: 'Deploy Gift of the Givers Web App'
     steps:
 
+    # Download the published Web App artifact
     - download: current
       artifact: 'GiftOfTheGiversRelease'
-    - powershell: |
-        $azPath = "C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin"
 
-        Write-Host "Adding Azure CLI directory to PATH:"
-        Write-Host $azPath
-
-        Write-Host "##vso[task.prependpath]$azPath"
-      displayName: 'Configure Azure CLI PATH'
-    - task: AzureWebApp@1
-      displayName: 'Deploy to Azure Web App'
+    # Download the secure publishing profile
+    - task: DownloadSecureFile@1
+      name: publishProfile
+      displayName: 'Download Azure publishing profile'
       inputs:
-        azureSubscription: 'GiftOfTheGivers-Azure-Connection'
-        appType: 'webAppLinux'
-        appName: 'giftofthegivers-disaster-relief-4827'
-        package: '$(Pipeline.Workspace)/GiftOfTheGiversRelease/**/*.zip'
-        deploymentMethod: 'zipDeploy'
+        secureFile: 'GiftOfTheGivers-Disaster-Relief-4827.PublishSettings'
+
+    # Deploy using the publishing profile
+    - task: AzureRmWebAppDeployment@4
+      displayName: 'Deploy to Azure Web App using Publish Profile'
+      inputs:
+        ConnectionType: 'PublishProfile'
+        PublishProfilePath: '$(publishProfile.secureFilePath)'
+        WebAppName: 'giftofthegivers-disaster-relief-4827'
+        Package: '$(Pipeline.Workspace)/GiftOfTheGiversRelease/**/*.zip'
+        enableCustomDeployment: true
+        DeploymentType: 'zipDeploy'
+
+
 
 
 # STAGE 3: C.2 AZURE FUNCTIONS DEPLOYMENT
