@@ -234,7 +234,7 @@ stages:
           Write-Host "Deploying package: $($zip.FullName)"
 
           az webapp deploy `
-            --resource-group "$(RSG-RCWCCT-ST10398698-SANORTH)" `
+            --resource-group "RSG-RCWCCT-ST10398698-SANORTH" `
             --name "giftofthegivers-disaster-relief-4827" `
             --src-path "$($zip.FullName)" `
             --type zip
